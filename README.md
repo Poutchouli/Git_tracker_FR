@@ -1,6 +1,6 @@
 # Rapport d'Audit de l'Activité Git (Git Tracker)
 
-Un outil simple et interactif fonctionnant entièrement dans le navigateur pour analyser, visualiser et auditer l'activité d'un dépôt Git. Il permet de générer des rapports détaillés sur les habitudes de travail (commits pendant les heures de travail vs hors heures de travail) et d'exporter ces données au format PDF.
+Un outil simple et interactif fonctionnant entièrement dans le navigateur pour analyser, visualiser et auditer l'activité d'un dépôt Git. Il permet de générer des rapports détaillés sur les habitudes de travail (commits pendant les heures de travail vs hors heures de travail) et d'exporter ces données au format image (PNG).
 
 ## 🚀 Fonctionnalités principales
 
@@ -16,7 +16,7 @@ Un outil simple et interactif fonctionnant entièrement dans le navigateur pour 
   - Ratio des commits effectués pendant les heures de travail vs hors plage horaire (en volume et en temps estimé).
   - Courbe d'évolution de l'activité au fil du temps.
 - **Calcul du temps de développement** : Estimation du temps passé à coder en fonction de la fréquence et de l'espacement des commits.
-- **Exportation PDF** : Générez un rapport propre et professionnel au format PDF (paysage) en un seul clic.
+- **Exportation Image** : Générez un rapport propre et professionnel au format PNG en un seul clic.
 
 ## 🛠️ Technologies utilisées
 
@@ -26,7 +26,7 @@ Ce projet est une application "Single Page" (SPA) contenue dans un seul fichier 
 - **Tailwind CSS** (Stylisation rapide et responsive)
 - **Recharts** (Génération des graphiques interactifs)
 - **Lucide Icons** (Icônes de l'interface)
-- **jsPDF & html2canvas** (Génération et exportation du rapport PDF)
+- **html2canvas** (Génération et exportation du rapport en image)
 - **Babel** (Transpilation du JSX à la volée dans le navigateur)
 
 ## 📋 Comment l'utiliser ?
@@ -48,7 +48,7 @@ Ce projet est une application "Single Page" (SPA) contenue dans un seul fichier 
 4. **Personnaliser et Exporter** :
    - Naviguez dans l'onglet "Configuration" pour ajuster vos horaires et jours de congés.
    - Consultez l'onglet "Rapport" pour voir les graphiques et statistiques.
-   - Cliquez sur le bouton d'exportation pour télécharger votre rapport en PDF.
+   - Cliquez sur le bouton d'exportation pour télécharger votre rapport en image PNG.
 
 ## 📦 Installation
 

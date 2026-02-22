@@ -12,8 +12,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Bibliothèques d'exportation PDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- Bibliothèques d'exportation Image -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <style>
@@ -208,7 +207,7 @@
                 return dates.sort().reverse();
             };
 
-            const exportToPDF = async () => {
+            const exportToPNG = async () => {
                 if (!reportRef.current) return;
                 setIsExporting(true);
                 window.scrollTo(0, 0);
@@ -216,17 +215,18 @@
                 try {
                     const element = reportRef.current;
                     const canvas = await html2canvas(element, {
-                        scale: 2, // Augmenté pour une meilleure qualité et éviter les bugs de rendu
+                        scale: 2,
                         useCORS: true,
                         logging: false,
                         backgroundColor: '#ffffff'
                     });
-                    const imgData = canvas.toDataURL('image/png'); // Utilisation de PNG au lieu de JPEG pour éviter la corruption
-                    const pdf = new jspdf.jsPDF('l', 'mm', 'a4');
-                    const pdfWidth = pdf.internal.pageSize.getWidth();
-                    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                    pdf.save(`Audit_${appName.replace(/\s+/g, '_')}.pdf`);
+                    const imgData = canvas.toDataURL('image/png');
+                    
+                    // Créer un lien de téléchargement
+                    const link = document.createElement('a');
+                    link.download = `Audit_${appName.replace(/\s+/g, '_')}.png`;
+                    link.href = imgData;
+                    link.click();
                 } catch (err) { console.error(err); } finally { setIsExporting(false); }
             };
 
@@ -330,9 +330,9 @@
                                     <div className="space-y-4">
                                         <div className="flex justify-between items-center no-print px-1">
                                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Analyse consolidée</span>
-                                            <button onClick={exportToPDF} disabled={isExporting} className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 text-white rounded-lg font-bold text-[10px] uppercase shadow-lg shadow-slate-200">
+                                            <button onClick={exportToPNG} disabled={isExporting} className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 text-white rounded-lg font-bold text-[10px] uppercase shadow-lg shadow-slate-200">
                                                 <Icon name={isExporting ? "loader" : "download"} size={12} className={isExporting ? "animate-spin" : ""} />
-                                                {isExporting ? "Génération..." : "Exporter Rapport PDF"}
+                                                {isExporting ? "Génération..." : "Exporter Rapport PNG"}
                                             </button>
                                         </div>
 
