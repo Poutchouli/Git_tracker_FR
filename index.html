@@ -216,18 +216,16 @@
                 try {
                     const element = reportRef.current;
                     const canvas = await html2canvas(element, {
-                        scale: 1.5,
+                        scale: 2, // Augmenté pour une meilleure qualité et éviter les bugs de rendu
                         useCORS: true,
                         logging: false,
-                        backgroundColor: '#ffffff',
-                        width: element.offsetWidth,
-                        height: element.offsetHeight,
+                        backgroundColor: '#ffffff'
                     });
-                    const imgData = canvas.toDataURL('image/jpeg', 0.8);
+                    const imgData = canvas.toDataURL('image/png'); // Utilisation de PNG au lieu de JPEG pour éviter la corruption
                     const pdf = new jspdf.jsPDF('l', 'mm', 'a4');
                     const pdfWidth = pdf.internal.pageSize.getWidth();
                     const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
                     pdf.save(`Audit_${appName.replace(/\s+/g, '_')}.pdf`);
                 } catch (err) { console.error(err); } finally { setIsExporting(false); }
             };
