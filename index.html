@@ -13,7 +13,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Bibliothèque d'exportation Image -->
-    <script src="https://cdn.jsdelivr.net/npm/dom-to-image-more@3.4.5/dist/dom-to-image-more.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
@@ -154,18 +154,41 @@
                     if (isNight) dailyData[c.dayIndex].night++; else dailyData[c.dayIndex].day++;
                     if (isCommitOnWorkTime(c)) workTimeCount++;
                     
+                    let addedTime = 0;
+                    const applicableThreshold = isNight ? sessionNightThreshold : sessionDayThreshold;
+                    const thresholdMs = applicableThreshold * 60 * 1000;
+
+                    let inRangeWithPrev = false;
                     if (i > 0) {
                         const prev = sortedCommits[i - 1];
                         const gap = c.fullDate - prev.fullDate;
-                        
-                        // Détermination du seuil applicable (jour ou nuit)
-                        const applicableThreshold = isNight ? sessionNightThreshold : sessionDayThreshold;
-                        const thresholdMs = applicableThreshold * 60 * 1000;
 
                         if (gap <= thresholdMs) {
-                            currentTotalMs += gap;
-                            if (isCommitOnWorkTime(c)) totalWorkDurationMs += gap; else totalOffDurationMs += gap;
+                            addedTime = gap;
+                            inRangeWithPrev = true;
                         }
+                    }
+
+                    let inRangeWithNext = false;
+                    if (i < sortedCommits.length - 1) {
+                        const nextC = sortedCommits[i + 1];
+                        const isNightNext = nextC.decimalTime >= nightHours.start || nextC.decimalTime < nightHours.end;
+                        const nextThresholdMs = (isNightNext ? sessionNightThreshold : sessionDayThreshold) * 60 * 1000;
+                        const gapNext = nextC.fullDate - c.fullDate;
+                        
+                        if (gapNext <= nextThresholdMs) {
+                            inRangeWithNext = true;
+                        }
+                    }
+
+                    if (!inRangeWithPrev && !inRangeWithNext) {
+                        // Commit isolé : on ajoute 10 minutes par défaut
+                        addedTime = 10 * 60 * 1000;
+                    }
+
+                    if (addedTime > 0) {
+                        currentTotalMs += addedTime;
+                        if (isCommitOnWorkTime(c)) totalWorkDurationMs += addedTime; else totalOffDurationMs += addedTime;
                     }
 
                     cumulativeData.push({
@@ -210,26 +233,31 @@
             const exportToPNG = async () => {
                 if (!reportRef.current) return;
                 setIsExporting(true);
-                window.scrollTo(0, 0);
-                await new Promise(resolve => setTimeout(resolve, 600));
+
                 try {
                     const element = reportRef.current;
-                    const scale = 2;
-                    const imgData = await domtoimage.toPng(element, {
-                        width: element.offsetWidth * scale,
-                        height: element.offsetHeight * scale,
-                        bgcolor: '#ffffff',
-                        style: {
-                            transform: `scale(${scale})`,
-                            transformOrigin: 'top left'
-                        }
-                    });
                     
+                    // html2canvas gère le scale nativement et beaucoup mieux
+                    const canvas = await html2canvas(element, {
+                        scale: 2, // Pour une haute résolution
+                        useCORS: true, // Important pour les images externes
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        windowWidth: element.scrollWidth,
+                        windowHeight: element.scrollHeight
+                    });
+
+                    const imgData = canvas.toDataURL('image/png');
                     const link = document.createElement('a');
                     link.download = `Audit_${appName.replace(/\s+/g, '_')}.png`;
                     link.href = imgData;
                     link.click();
-                } catch (err) { console.error(err); } finally { setIsExporting(false); }
+                    
+                } catch (err) {
+                    console.error("Erreur lors de l'export :", err);
+                } finally {
+                    setIsExporting(false);
+                }
             };
 
             const toggleExcludeDate = (date) => {
