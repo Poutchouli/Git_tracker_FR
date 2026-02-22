@@ -53,6 +53,11 @@
             const [lunchHours, setLunchHours] = useState({ start: 12, end: 14 });
             const [nightHours, setNightHours] = useState({ start: 20, end: 7 });
             const [excludedDates, setExcludedDates] = useState([]);
+            
+            // Nouveaux états pour gérer les intervalles de session distincts
+            const [sessionDayThreshold, setSessionDayThreshold] = useState(60); 
+            const [sessionNightThreshold, setSessionNightThreshold] = useState(120); 
+
             const [activeTab, setActiveTab] = useState('import');
             const [copied, setCopied] = useState(false);
             const [showNightConfig, setShowNightConfig] = useState(false);
@@ -80,6 +85,14 @@
                 const hours = Math.floor(totalMinutes / 60);
                 const minutes = totalMinutes % 60;
                 return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+            };
+
+            const formatThresholdDisplay = (minutes) => {
+                const h = Math.floor(minutes / 60);
+                const m = minutes % 60;
+                if (h === 0) return `${m} min`;
+                if (m === 0) return `${h}h`;
+                return `${h}h ${m}m`;
             };
 
             const copyToClipboard = () => {
@@ -121,7 +134,6 @@
                 let workTimeCount = 0;
                 let totalWorkDurationMs = 0;
                 let totalOffDurationMs = 0;
-                const SESSION_THRESHOLD_MS = 60 * 60 * 1000;
 
                 const dates = commits.map(c => c.fullDate.getTime());
                 const minDate = new Date(Math.min(...dates)).toLocaleDateString('fr-FR');
@@ -146,13 +158,17 @@
                     if (i > 0) {
                         const prev = sortedCommits[i - 1];
                         const gap = c.fullDate - prev.fullDate;
-                        if (gap <= SESSION_THRESHOLD_MS) {
+                        
+                        // Détermination du seuil applicable (jour ou nuit)
+                        const applicableThreshold = isNight ? sessionNightThreshold : sessionDayThreshold;
+                        const thresholdMs = applicableThreshold * 60 * 1000;
+
+                        if (gap <= thresholdMs) {
                             currentTotalMs += gap;
                             if (isCommitOnWorkTime(c)) totalWorkDurationMs += gap; else totalOffDurationMs += gap;
                         }
                     }
 
-                    // On enregistre un point de donnée tous les N commits pour alléger le graph ou à chaque commit si peu nombreux
                     cumulativeData.push({
                         date: c.fullDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
                         fullDate: c.fullDate,
@@ -160,7 +176,14 @@
                     });
                 });
                 
+                // Pourcentage de volume de commits
                 const workPercent = ((workTimeCount / commits.length) * 100).toFixed(1);
+                
+                // Calcul du pourcentage de temps (heures)
+                const totalCalculatedMs = totalWorkDurationMs + totalOffDurationMs;
+                const workTimePercentRaw = totalCalculatedMs > 0 ? ((totalWorkDurationMs / totalCalculatedMs) * 100) : 0;
+                const workTimePercent = workTimePercentRaw.toFixed(1);
+                const offTimePercent = totalCalculatedMs > 0 ? (100 - workTimePercentRaw).toFixed(1) : 0;
                 
                 return {
                     dailyData, total: commits.length, 
@@ -171,9 +194,14 @@
                     pieData: [
                         { name: 'Tps Travail', value: parseFloat(workPercent), color: '#10b981' },
                         { name: 'Hors Plage', value: parseFloat((100 - workPercent).toFixed(1)), color: '#f43f5e' }
+                    ],
+                    pieTimeData: [
+                        { name: 'Tps Travail', value: parseFloat(workTimePercent), color: '#10b981' },
+                        { name: 'Hors Plage', value: parseFloat(offTimePercent), color: '#f43f5e' }
                     ]
                 };
-            }, [commits, workHours, lunchHours, nightHours, excludedDates]);
+            // Mise à jour des dépendances pour inclure les deux nouveaux seuils
+            }, [commits, workHours, lunchHours, nightHours, excludedDates, sessionDayThreshold, sessionNightThreshold]); 
 
             const getUniqueDates = () => {
                 const dates = [...new Set(commits.map(c => c.dateKey))];
@@ -196,7 +224,7 @@
                         height: element.offsetHeight,
                     });
                     const imgData = canvas.toDataURL('image/jpeg', 0.8);
-                    const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+                    const pdf = new jspdf.jsPDF('l', 'mm', 'a4');
                     const pdfWidth = pdf.internal.pageSize.getWidth();
                     const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
                     pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
@@ -245,6 +273,38 @@
                                         ))}
                                     </div>
                                 </div>
+
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                    <h2 className="text-[10px] font-bold uppercase text-slate-400 mb-3 tracking-widest">Calcul du Temps</h2>
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-[10px] font-bold text-slate-600">Session Max (Jour)</span>
+                                                <span className="text-[10px] font-mono font-bold">{formatThresholdDisplay(sessionDayThreshold)}</span>
+                                            </div>
+                                            <input 
+                                                type="range" min="10" max="180" step="10" 
+                                                value={sessionDayThreshold} 
+                                                onChange={(e) => setSessionDayThreshold(parseInt(e.target.value))} 
+                                                className="w-full h-1 appearance-none cursor-pointer" 
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-[10px] font-bold text-slate-600">Session Max (Nuit)</span>
+                                                <span className="text-[10px] font-mono font-bold">{formatThresholdDisplay(sessionNightThreshold)}</span>
+                                            </div>
+                                            <input 
+                                                type="range" min="10" max="360" step="10" 
+                                                value={sessionNightThreshold} 
+                                                onChange={(e) => setSessionNightThreshold(parseInt(e.target.value))} 
+                                                className="w-full h-1 appearance-none cursor-pointer" 
+                                            />
+                                        </div>
+                                        <p className="text-[8px] text-slate-400 leading-tight">Ajustez l'intervalle d'inactivité autorisé selon la période avant de couper une session.</p>
+                                    </div>
+                                </div>
+
                                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                     <h2 className="text-[10px] font-bold uppercase text-slate-400 mb-2">Jours Off</h2>
                                     <div className="max-h-32 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
@@ -278,7 +338,7 @@
                                             </button>
                                         </div>
 
-                                        <div className="bg-white p-6 space-y-4 rounded-xl border border-slate-100 shadow-sm" data-report-target ref={reportRef} style={{ width: '210mm', minHeight: '290mm', margin: '0 auto' }}>
+                                        <div className="bg-white p-6 space-y-4 rounded-xl border border-slate-100 shadow-sm" data-report-target ref={reportRef} style={{ width: '297mm', minHeight: '210mm', margin: '0 auto' }}>
                                             <div className="p-6 bg-slate-900 text-white rounded-2xl flex justify-between items-center">
                                                 <div>
                                                     <h1 className="text-lg font-black uppercase leading-none mb-1">Audit de Production Logicielle</h1>
@@ -319,26 +379,54 @@
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
-                                                <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col justify-center text-left">
+                                                <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col text-left">
                                                     <h3 className="text-[10px] font-black text-slate-900 uppercase mb-4">Répartition Conformité</h3>
-                                                    <div className="flex items-center gap-4">
-                                                        <div className="h-28 w-28 shrink-0">
-                                                            <ResponsiveContainer>
-                                                                <PieChart>
-                                                                    <Pie data={stats?.pieData} innerRadius={35} outerRadius={50} paddingAngle={5} dataKey="value" isAnimationActive={false}>
-                                                                        {stats?.pieData.map((e, i) => <Cell key={i} fill={e.color} stroke="none" />)}
-                                                                    </Pie>
-                                                                </PieChart>
-                                                            </ResponsiveContainer>
-                                                        </div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                                                                <span className="text-[10px] font-bold text-slate-600">Standard: {stats?.pieData[0].value}%</span>
+                                                    <div className="flex gap-4">
+                                                        <div className="flex-1 flex flex-col items-center">
+                                                            <span className="text-[8px] font-bold text-slate-400 uppercase mb-2">Volume (Commits)</span>
+                                                            <div className="h-20 w-20 shrink-0 mb-2">
+                                                                <ResponsiveContainer>
+                                                                    <PieChart>
+                                                                        <Pie data={stats?.pieData} innerRadius={25} outerRadius={38} paddingAngle={5} dataKey="value" isAnimationActive={false}>
+                                                                            {stats?.pieData.map((e, i) => <Cell key={i} fill={e.color} stroke="none" />)}
+                                                                        </Pie>
+                                                                    </PieChart>
+                                                                </ResponsiveContainer>
                                                             </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-2 h-2 rounded-full bg-rose-500"></div>
-                                                                <span className="text-[10px] font-bold text-slate-600">Débordement: {stats?.pieData[1].value}%</span>
+                                                            <div className="space-y-1 w-full flex flex-col items-start pl-2">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                                                    <span className="text-[8px] font-bold text-slate-600">Std: {stats?.pieData[0]?.value || 0}%</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+                                                                    <span className="text-[8px] font-bold text-slate-600">Déb: {stats?.pieData[1]?.value || 0}%</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="w-px bg-slate-100 shrink-0"></div>
+
+                                                        <div className="flex-1 flex flex-col items-center">
+                                                            <span className="text-[8px] font-bold text-slate-400 uppercase mb-2">Temps (Heures)</span>
+                                                            <div className="h-20 w-20 shrink-0 mb-2">
+                                                                <ResponsiveContainer>
+                                                                    <PieChart>
+                                                                        <Pie data={stats?.pieTimeData} innerRadius={25} outerRadius={38} paddingAngle={5} dataKey="value" isAnimationActive={false}>
+                                                                            {stats?.pieTimeData.map((e, i) => <Cell key={i} fill={e.color} stroke="none" />)}
+                                                                        </Pie>
+                                                                    </PieChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                            <div className="space-y-1 w-full flex flex-col items-start pl-2">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                                                    <span className="text-[8px] font-bold text-slate-600">Std: {stats?.pieTimeData[0]?.value || 0}%</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+                                                                    <span className="text-[8px] font-bold text-slate-600">Déb: {stats?.pieTimeData[1]?.value || 0}%</span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
