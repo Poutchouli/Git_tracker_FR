@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rapport d'Audit de l'Activité Git</title>
+    <!-- Bibliothèques externes -->
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Bibliothèques d'exportation PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #ffffff; }
+        input[type="range"] { accent-color: #0f172a; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        @media print {
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body class="bg-white text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useRef } = React;
+        
+        const getRecharts = () => {
+            if (typeof Recharts === 'undefined') return null;
+            return Recharts;
+        };
+
+        const Icon = ({ name, size = 18, className = "" }) => {
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, []);
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const App = () => {
+            const [rawData, setRawData] = useState('');
+            const [appName, setAppName] = useState('Application Sans Nom');
+            const [workHours, setWorkHours] = useState({ start: 9, end: 18 });
+            const [lunchHours, setLunchHours] = useState({ start: 12, end: 14 });
+            const [nightHours, setNightHours] = useState({ start: 20, end: 7 });
+            const [excludedDates, setExcludedDates] = useState([]);
+            const [activeTab, setActiveTab] = useState('import');
+            const [copied, setCopied] = useState(false);
+            const [showNightConfig, setShowNightConfig] = useState(false);
+            const [isExporting, setIsExporting] = useState(false);
+            
+            const reportRef = useRef(null);
+
+            const gitCommand = 'git log --date=local --pretty=format:"%h %ad %s"';
+
+            const rc = getRecharts();
+            if (!rc) return <div className="p-10 text-center font-bold">Initialisation des composants...</div>;
+
+            const { 
+                BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, PieChart, Pie, AreaChart, Area 
+            } = rc;
+
+            const formatTimeDisplay = (val) => {
+                const hours = Math.floor(val);
+                const minutes = val % 1 === 0.5 ? '30' : '00';
+                return `${hours}h${minutes}`;
+            };
+
+            const formatDuration = (ms) => {
+                const totalMinutes = Math.floor(ms / (1000 * 60));
+                const hours = Math.floor(totalMinutes / 60);
+                const minutes = totalMinutes % 60;
+                return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+            };
+
+            const copyToClipboard = () => {
+                const el = document.createElement('textarea');
+                el.value = gitCommand;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            const commits = useMemo(() => {
+                if (!rawData.trim()) return [];
+                const lines = rawData.trim().split('\n');
+                return lines.map(line => {
+                    const cleanLine = line.replace(/\x1B\[[0-9;]*[mK]/g, '');
+                    const regex = /^([a-f0-9]+)\s+([A-Za-z]+)\s+([A-Za-z]+)\s+(\d+)\s+(\d{2}):(\d{2}):\d{2}\s+(\d{4})\s+(.*)$/;
+                    const match = cleanLine.match(regex);
+                    if (!match) return null;
+                    const [_, hash, dayShort, month, dayNum, hour, min, year, message] = match;
+                    const dateStr = `${month} ${dayNum}, ${year} ${hour}:${min}:00`;
+                    const dateObj = new Date(dateStr);
+                    const isoDate = dateObj.toISOString().split('T')[0];
+                    const decimalTime = parseInt(hour) + (parseInt(min) / 60);
+                    return { hash, fullDate: dateObj, dateKey: isoDate, hour: parseInt(hour), decimalTime, dayIndex: dateObj.getDay(), message };
+                }).filter(c => c !== null);
+            }, [rawData]);
+
+            const stats = useMemo(() => {
+                if (commits.length === 0) return null;
+                const sortedCommits = [...commits].sort((a, b) => a.fullDate - b.fullDate);
+                const dailyData = [
+                    { name: 'Dim', day: 0, night: 0 }, { name: 'Lun', day: 0, night: 0 }, { name: 'Mar', day: 0, night: 0 },
+                    { name: 'Mer', day: 0, night: 0 }, { name: 'Jeu', day: 0, night: 0 }, { name: 'Ven', day: 0, night: 0 }, { name: 'Sam', day: 0, night: 0 }
+                ];
+
+                let workTimeCount = 0;
+                let totalWorkDurationMs = 0;
+                let totalOffDurationMs = 0;
+                const SESSION_THRESHOLD_MS = 60 * 60 * 1000;
+
+                const dates = commits.map(c => c.fullDate.getTime());
+                const minDate = new Date(Math.min(...dates)).toLocaleDateString('fr-FR');
+                const maxDate = new Date(Math.max(...dates)).toLocaleDateString('fr-FR');
+
+                const isCommitOnWorkTime = (c) => {
+                    const isWeekend = c.dayIndex === 0 || c.dayIndex === 6;
+                    const isWithinWorkDay = c.decimalTime >= workHours.start && c.decimalTime < workHours.end;
+                    const isLunchTime = c.decimalTime >= lunchHours.start && c.decimalTime < lunchHours.end;
+                    const isLeaveDay = excludedDates.includes(c.dateKey);
+                    return !isWeekend && isWithinWorkDay && !isLunchTime && !isLeaveDay;
+                };
+
+                const cumulativeData = [];
+                let currentTotalMs = 0;
+
+                sortedCommits.forEach((c, i) => {
+                    const isNight = c.decimalTime >= nightHours.start || c.decimalTime < nightHours.end;
+                    if (isNight) dailyData[c.dayIndex].night++; else dailyData[c.dayIndex].day++;
+                    if (isCommitOnWorkTime(c)) workTimeCount++;
+                    
+                    if (i > 0) {
+                        const prev = sortedCommits[i - 1];
+                        const gap = c.fullDate - prev.fullDate;
+                        if (gap <= SESSION_THRESHOLD_MS) {
+                            currentTotalMs += gap;
+                            if (isCommitOnWorkTime(c)) totalWorkDurationMs += gap; else totalOffDurationMs += gap;
+                        }
+                    }
+
+                    // On enregistre un point de donnée tous les N commits pour alléger le graph ou à chaque commit si peu nombreux
+                    cumulativeData.push({
+                        date: c.fullDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+                        fullDate: c.fullDate,
+                        hours: parseFloat((currentTotalMs / (1000 * 3600)).toFixed(2))
+                    });
+                });
+                
+                const workPercent = ((workTimeCount / commits.length) * 100).toFixed(1);
+                
+                return {
+                    dailyData, total: commits.length, 
+                    workCount: workTimeCount, offCount: commits.length - workTimeCount,
+                    period: { start: minDate, end: maxDate },
+                    developmentTime: { work: totalWorkDurationMs, off: totalOffDurationMs, total: totalWorkDurationMs + totalOffDurationMs },
+                    cumulativeData,
+                    pieData: [
+                        { name: 'Tps Travail', value: parseFloat(workPercent), color: '#10b981' },
+                        { name: 'Hors Plage', value: parseFloat((100 - workPercent).toFixed(1)), color: '#f43f5e' }
+                    ]
+                };
+            }, [commits, workHours, lunchHours, nightHours, excludedDates]);
+
+            const getUniqueDates = () => {
+                const dates = [...new Set(commits.map(c => c.dateKey))];
+                return dates.sort().reverse();
+            };
+
+            const exportToPDF = async () => {
+                if (!reportRef.current) return;
+                setIsExporting(true);
+                window.scrollTo(0, 0);
+                await new Promise(resolve => setTimeout(resolve, 600));
+                try {
+                    const element = reportRef.current;
+                    const canvas = await html2canvas(element, {
+                        scale: 1.5,
+                        useCORS: true,
+                        logging: false,
+                        backgroundColor: '#ffffff',
+                        width: element.offsetWidth,
+                        height: element.offsetHeight,
+                    });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.8);
+                    const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+                    const pdfWidth = pdf.internal.pageSize.getWidth();
+                    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                    pdf.save(`Audit_${appName.replace(/\s+/g, '_')}.pdf`);
+                } catch (err) { console.error(err); } finally { setIsExporting(false); }
+            };
+
+            const toggleExcludeDate = (date) => {
+                setExcludedDates(prev => prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]);
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-6 bg-white">
+                    <div className="max-w-5xl mx-auto">
+                        <header className="mb-4 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b pb-4 no-print">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <Icon name="shield-check" size={24} className="text-slate-800" />
+                                    <h1 className="text-xl font-extrabold text-slate-900 uppercase">Audit Git Pro</h1>
+                                </div>
+                                <p className="text-slate-500 text-xs font-medium">Analyse synthétique de la charge de production.</p>
+                            </div>
+                            <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200">
+                                <button onClick={() => setActiveTab('import')} className={`px-4 py-1.5 rounded-md font-bold text-xs transition-all ${activeTab === 'import' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Import</button>
+                                <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-1.5 rounded-md font-bold text-xs transition-all ${activeTab === 'dashboard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`} disabled={commits.length === 0}>Dashboard</button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                            <aside className="lg:col-span-1 space-y-4 no-print">
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Application</label>
+                                    <input type="text" value={appName} onChange={(e) => setAppName(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-semibold outline-none focus:ring-1 focus:ring-slate-400 mb-4" />
+                                    
+                                    <h2 className="text-[10px] font-bold uppercase text-slate-400 mb-3 tracking-widest">Horaires</h2>
+                                    <div className="space-y-4">
+                                        {[ {l: 'Travail', k: 'workHours'}, {l: 'Pause', k: 'lunchHours'} ].map(ref => (
+                                            <div key={ref.k} className="space-y-2 border-b border-slate-200 pb-2 last:border-0">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-[10px] font-bold text-slate-600">{ref.l}</span>
+                                                    <span className="text-[10px] font-mono font-bold">{formatTimeDisplay(ref.k === 'workHours' ? workHours.start : lunchHours.start)} - {formatTimeDisplay(ref.k === 'workHours' ? workHours.end : lunchHours.end)}</span>
+                                                </div>
+                                                <input type="range" min="0" max="23.5" step="0.5" value={ref.k === 'workHours' ? workHours.start : lunchHours.start} onChange={(e) => (ref.k === 'workHours' ? setWorkHours({...workHours, start: parseFloat(e.target.value)}) : setLunchHours({...lunchHours, start: parseFloat(e.target.value)}))} className="w-full h-1 appearance-none cursor-pointer" />
+                                                <input type="range" min="0" max="23.5" step="0.5" value={ref.k === 'workHours' ? workHours.end : lunchHours.end} onChange={(e) => (ref.k === 'workHours' ? setWorkHours({...workHours, end: parseFloat(e.target.value)}) : setLunchHours({...lunchHours, end: parseFloat(e.target.value)}))} className="w-full h-1 appearance-none cursor-pointer" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                    <h2 className="text-[10px] font-bold uppercase text-slate-400 mb-2">Jours Off</h2>
+                                    <div className="max-h-32 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                        {getUniqueDates().map(date => (
+                                            <div key={date} className="flex items-center justify-between p-1.5 hover:bg-white rounded border border-transparent hover:border-slate-200">
+                                                <span className="text-[10px] font-mono text-slate-600">{date}</span>
+                                                <button onClick={() => toggleExcludeDate(date)} className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${excludedDates.includes(date) ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-500'}`}>{excludedDates.includes(date) ? 'Congé' : 'Actif'}</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </aside>
+
+                            <main className="lg:col-span-3">
+                                {activeTab === 'import' ? (
+                                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col no-print h-[500px]">
+                                        <div className="bg-slate-900 rounded-lg p-3 flex items-center justify-between mb-4">
+                                            <code className="text-indigo-300 text-[10px] font-mono truncate">{gitCommand}</code>
+                                            <button onClick={copyToClipboard} className="ml-4 p-1.5 bg-slate-800 text-slate-300 rounded hover:text-white">{copied ? <Icon name="check" size={14} className="text-emerald-500" /> : <Icon name="copy" size={14} />}</button>
+                                        </div>
+                                        <textarea value={rawData} onChange={(e) => setRawData(e.target.value)} placeholder="Collez le résultat du git log..." className="flex-grow w-full p-4 font-mono text-[10px] bg-slate-50 rounded-lg border border-slate-200 focus:bg-white outline-none" />
+                                        <button onClick={() => setActiveTab('dashboard')} disabled={commits.length === 0} className="mt-4 w-full py-2 bg-slate-900 text-white rounded-lg font-bold text-xs uppercase disabled:opacity-50">Lancer l'Analyse</button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center no-print px-1">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Analyse consolidée</span>
+                                            <button onClick={exportToPDF} disabled={isExporting} className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 text-white rounded-lg font-bold text-[10px] uppercase shadow-lg shadow-slate-200">
+                                                <Icon name={isExporting ? "loader" : "download"} size={12} className={isExporting ? "animate-spin" : ""} />
+                                                {isExporting ? "Génération..." : "Exporter Rapport PDF"}
+                                            </button>
+                                        </div>
+
+                                        <div className="bg-white p-6 space-y-4 rounded-xl border border-slate-100 shadow-sm" data-report-target ref={reportRef} style={{ width: '210mm', minHeight: '290mm', margin: '0 auto' }}>
+                                            <div className="p-6 bg-slate-900 text-white rounded-2xl flex justify-between items-center">
+                                                <div>
+                                                    <h1 className="text-lg font-black uppercase leading-none mb-1">Audit de Production Logicielle</h1>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{appName} • {stats?.period.start} → {stats?.period.end}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[8px] uppercase font-black text-slate-500 tracking-tighter mb-1">Charge Totale Estimée</p>
+                                                    <p className="text-xl font-black">{formatDuration(stats?.developmentTime.total)}</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-4 gap-3 text-left">
+                                                {[ 
+                                                    {l: 'Tps Réglementaire', v: formatDuration(stats?.developmentTime.work), c: 'text-emerald-600'},
+                                                    {l: 'Tps Hors Plage', v: formatDuration(stats?.developmentTime.off), c: 'text-rose-600'},
+                                                    {l: 'Volume Commits', v: stats?.total, c: 'text-slate-900'},
+                                                    {l: 'Ratio Diurne', v: stats?.pieData[0].value + '%', c: 'text-emerald-600'}
+                                                ].map((s,i) => (
+                                                    <div key={i} className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                                        <p className="text-[8px] text-slate-400 uppercase font-black mb-1">{s.l}</p>
+                                                        <p className={`text-sm font-bold ${s.c}`}>{s.v}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="bg-white border border-slate-100 rounded-2xl p-4 text-left">
+                                                    <h3 className="text-[10px] font-black text-slate-900 uppercase mb-3">Progression Cumulée (Heures)</h3>
+                                                    <div className="h-40 w-full">
+                                                        <ResponsiveContainer>
+                                                            <AreaChart data={stats?.cumulativeData} margin={{ left: -30 }}>
+                                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                                                <XAxis dataKey="date" fontSize={8} fontWeight="bold" hide />
+                                                                <YAxis fontSize={8} fontWeight="bold" axisLine={false} tickLine={false} stroke="#94a3b8" />
+                                                                <Tooltip contentStyle={{fontSize: '10px'}} labelStyle={{fontWeight: 'bold'}} />
+                                                                <Area type="monotone" dataKey="hours" stroke="#0f172a" fill="#e2e8f0" isAnimationActive={false} />
+                                                            </AreaChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-white border border-slate-100 rounded-2xl p-4 flex flex-col justify-center text-left">
+                                                    <h3 className="text-[10px] font-black text-slate-900 uppercase mb-4">Répartition Conformité</h3>
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="h-28 w-28 shrink-0">
+                                                            <ResponsiveContainer>
+                                                                <PieChart>
+                                                                    <Pie data={stats?.pieData} innerRadius={35} outerRadius={50} paddingAngle={5} dataKey="value" isAnimationActive={false}>
+                                                                        {stats?.pieData.map((e, i) => <Cell key={i} fill={e.color} stroke="none" />)}
+                                                                    </Pie>
+                                                                </PieChart>
+                                                            </ResponsiveContainer>
+                                                        </div>
+                                                        <div className="space-y-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                                                <span className="text-[10px] font-bold text-slate-600">Standard: {stats?.pieData[0].value}%</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-2 h-2 rounded-full bg-rose-500"></div>
+                                                                <span className="text-[10px] font-bold text-slate-600">Débordement: {stats?.pieData[1].value}%</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-white border border-slate-100 rounded-2xl p-4 text-left">
+                                                <h3 className="text-[10px] font-black text-slate-900 uppercase mb-4 italic">Intensité Hebdomadaire (Segments Jour / Nuit)</h3>
+                                                <div className="h-44 w-full">
+                                                    <ResponsiveContainer>
+                                                        <BarChart data={stats?.dailyData} margin={{ left: -25 }}>
+                                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                                            <XAxis dataKey="name" fontSize={9} fontWeight="bold" axisLine={false} tickLine={false} dy={10} stroke="#94a3b8" />
+                                                            <YAxis fontSize={9} fontWeight="bold" axisLine={false} tickLine={false} stroke="#94a3b8" />
+                                                            <Tooltip cursor={{fill: '#f8fafc'}} isAnimationActive={false} />
+                                                            <Legend iconType="rect" wrapperStyle={{ fontSize: '9px', fontWeight: 'black', textTransform: 'uppercase', paddingTop: '10px' }} />
+                                                            <Bar name="Activité Diurne" dataKey="day" stackId="a" fill="#475569" isAnimationActive={false} barSize={24} />
+                                                            <Bar name="Activité Nocturne" dataKey="night" stackId="a" fill="#0f172a" radius={[2, 2, 0, 0]} isAnimationActive={false} barSize={24} />
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+
+                                            <footer className="pt-4 border-t text-center space-y-1">
+                                                <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest leading-relaxed">
+                                                    Document Confidentiel • Analyse basée sur métadonnées Git • {appName}<br/>
+                                                    Édité le {new Date().toLocaleString('fr-FR')}
+                                                </p>
+                                            </footer>
+                                        </div>
+                                    </div>
+                                )}
+                            </main>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
